@@ -1,5 +1,6 @@
 import discord, util
 from svdl import Location
+from db.classes import User
 
 class SubmissionView(discord.ui.View):
     def __init__(self, main_locs: list[Location], imp_loc: Location, locs: list[Location]) -> None:
@@ -61,6 +62,14 @@ class SubmissionModal(discord.ui.Modal):
         except:
             return await interaction.response.send_message("Invalid number for impostor index.", ephemeral=True)
         self.view.guessed.append(interaction.user.id)
+
+        points = 0
+        if main_code.lower() == correct_main_code: points += 1
+        if imp_code.lower() == correct_imp_code: points += 1
+        if imp_index == correct_imp_index: points +=1
+        user_db = User(interaction.user.id)
+        total_points = user_db.add_points(points)
+
         embed = discord.Embed(
             title="Results",
             description="".join(f"[Location {self.view.locs.index(loc) + 1}]({util.get_maps_link(loc)}), " for loc in self.view.locs)[:-2],
@@ -69,4 +78,5 @@ class SubmissionModal(discord.ui.Modal):
         embed.add_field(name=f"Main Country ({'✅' if main_code.lower() == correct_main_code else '❌'})", value=f":flag_{correct_main_code}: {self.view.main_locs[0].country_name}", inline=False)
         embed.add_field(name=f"Impostor Country ({'✅' if imp_code.lower() == correct_imp_code else '❌'})", value=f":flag_{correct_imp_code}: {self.view.imp_loc.country_name}", inline=False)
         embed.add_field(name=f"Impostor Index ({'✅' if imp_index == correct_imp_index else '❌'})", value=f"`{correct_imp_index}`", inline=False)
+        embed.set_footer(text=f"Points: {points}/3 | Total Points: {total_points}", icon_url=interaction.user.display_avatar.url)
         return await interaction.response.send_message(embed=embed, ephemeral=True)

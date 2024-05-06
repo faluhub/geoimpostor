@@ -1,10 +1,9 @@
-import discord, os, dotenv, random, util
+import discord, os, random, util
 from discord import ApplicationContext
 from PIL import Image
 from concurrent import futures
 from ui import SubmissionView
-
-dotenv.load_dotenv()
+from db.classes import User
 
 debug = int(os.environ.get("DEBUG", 0)) == 1
 print(f"Debug mode: {debug}")
@@ -27,7 +26,7 @@ async def on_ready() -> None:
     print("Ready")
 
 @bot.slash_command(name="generate", description="Generates a new impostor challenge.")
-async def generate(ctx: ApplicationContext) -> None:
+async def generate_cmd(ctx: ApplicationContext) -> None:
     await ctx.defer()
 
     impostor_loc = util.rand_locs(amount=1)[0]
@@ -68,4 +67,65 @@ async def generate(ctx: ApplicationContext) -> None:
         )
     )
 
-bot.run(os.environ.get("DISCORD_TOKEN"))
+@bot.slash_command(name="leaderboard", description="Shows the points leaderboard.")
+@discord.option(
+    name="amount",
+    type=int,
+    description="The amount of users to fetch",
+    required=False
+)
+async def leaderboard_cmd(ctx: ApplicationContext, amount: int) -> None:
+    await ctx.defer()
+    amount = 5 if amount is None else amount
+
+    users = User.get_top(amount)
+    leaderboard = ""
+    rank = 0
+    for user in users:
+        user_id, points = user
+        user = await bot.get_or_fetch_user(user_id)
+        if not user is None:
+            rank += 1
+            leaderboard += f"**{rank}.** *{user.name}* - `{points}`\n"
+
+    if len(leaderboard) == 0:
+        return await ctx.followup.send(
+            embed=discord.Embed(
+                description="The leaderboard couldn't be processed.",
+                color=discord.Color.red()
+            )
+        )
+    return await ctx.followup.send(
+        embed=discord.Embed(
+            title=f"Top {min(amount, len(users))} Players",
+            description=leaderboard,
+            color=0xFFFFFF
+        )
+    )
+
+@bot.slash_command(name="points", description="Shows the points for the given user.")
+@discord.option(
+    name="member",
+    type=discord.Member,
+    description="The user whose points you want to view",
+    required=False
+)
+async def points_cmd(ctx: ApplicationContext, member: discord.Member):
+    await ctx.defer()
+
+    user = ctx.author if member is None else member
+    user_db = User(user.id)
+    if not user_db.exists():
+        return await ctx.followup.send(
+            embed=discord.Embed(
+                description="This user hasn't played yet.",
+                color=discord.Color.red()
+            )
+        )
+    embed = discord.Embed(color=0xFFFFFF)
+    embed.set_author(name=user.name, icon_url=user.display_avatar.url)
+    embed.add_field(name="Points:", value=f"`{user_db.get_points()}`", inline=False)
+    return await ctx.followup.send(embed=embed)
+
+def run():
+    bot.run(os.environ.get("DISCORD_TOKEN"))
