@@ -1,8 +1,7 @@
-import cv2, requests
+import cv2, asyncio, aiohttp
 import numpy as np
 from PIL import Image
 from io import BytesIO
-from concurrent import futures
 
 class Location:
     def __init__(self, data: dict) -> None:
@@ -13,7 +12,8 @@ class Location:
         self.pitch = data.get("pitch", 0)
         self.country_code = data.get("countryCode", "us")
         self.country_name = data.get("countryName", "United States")
-        self.dl_workers = 5
+        self.dl_workers = 80
+        self.semaphore = asyncio.BoundedSemaphore(self.dl_workers)
         self.zoom = 3
         self.max_tiles_x = 2 ** self.zoom
         self.max_tiles_y = 2 ** (self.zoom - 1)
@@ -23,27 +23,25 @@ class Location:
         self.output_width = 1920 / 2
         self.output_height = 1080 / 2
 
-    def download_tile(self, x: int, y: int) -> Image.Image:
+    async def download_tile(self, x, y):
         url = f"https://cbk0.google.com/cbk?output=tile&panoid={self.pano_id}&x={x}&y={y}&zoom={self.zoom}"
-        res = requests.get(url).content
-        return Image.open(BytesIO(res))
+        async with self.semaphore:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    image_content = await response.read()
+                    return Image.open(BytesIO(image_content))
 
-    def download(self) -> Image.Image:
+    async def download(self):
         image = Image.new("RGB", (self.tile_size * self.max_tiles_x, self.tile_size * self.max_tiles_y))
-        with futures.ThreadPoolExecutor(max_workers=self.dl_workers) as executor:
-            future_to_tile = {}
-            for x in range(self.max_tiles_x):
-                for y in range(self.max_tiles_y):
-                    future = executor.submit(self.download_tile, x, y)
-                    future_to_tile[future] = (x, y)
-            for future in futures.as_completed(future_to_tile):
-                x, y = future_to_tile[future]
-                try:
-                    tile = future.result()
-                    image.paste(tile, (x * self.tile_size, y * self.tile_size))
-                    tile.close()
-                except Exception as e:
-                    print(f"Exception occurred: {e}")
+        tasks = []
+        for x in range(self.max_tiles_x):
+            for y in range(self.max_tiles_y):
+                tasks.append(self.download_tile(x, y))
+        downloaded_tiles = await asyncio.gather(*tasks)
+        for (x, y), tile in zip([(x, y) for x in range(self.max_tiles_x) for y in range(self.max_tiles_y)], downloaded_tiles):
+            if tile:
+                image.paste(tile, (x * self.tile_size, y * self.tile_size))
+                tile.close()
         return self.project(self.crop_borders(image))
 
     def project(self, image: Image.Image) -> Image.Image:

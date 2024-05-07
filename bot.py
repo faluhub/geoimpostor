@@ -1,8 +1,8 @@
-import discord, os, random, util
+import discord, os, random, util, asyncio
 from discord import ApplicationContext
 from PIL import Image
-from concurrent import futures
 from ui import SubmissionView
+from svdl import Location
 from db.classes import User
 
 debug = int(os.environ.get("DEBUG", 0)) == 1
@@ -25,29 +25,30 @@ async def on_connect() -> None:
 async def on_ready() -> None:
     print("Ready")
 
+async def generate_image(locs: list[Location]):
+    tasks = [loc.download() for loc in locs]
+    downloaded_images = await asyncio.gather(*tasks)
+    image = Image.new("RGB", (1920, 1080))
+    for i, pano in enumerate(downloaded_images):
+        x = i % 2 * pano.width
+        y = (i // 2) * pano.height
+        image.paste(pano, (x, y))
+        pano.close()
+    return image
+
 @bot.slash_command(name="generate", description="Generates a new impostor challenge.")
 async def generate_cmd(ctx: ApplicationContext) -> None:
     await ctx.defer()
 
+    main_locs = util.rand_locs(amount=3)
     impostor_loc = util.rand_locs(amount=1)[0]
-    main_locs = [impostor_loc]
-    while impostor_loc in main_locs:
-        main_locs = util.rand_locs(amount=3)
+    while impostor_loc.country_code == main_locs[0].country_code:
+        impostor_loc = util.rand_locs(amount=1)[0]
     locs = main_locs.copy()
     locs.append(impostor_loc)
     random.shuffle(locs)
 
-    image = Image.new("RGB", (1920, 1080))
-    with futures.ThreadPoolExecutor() as executor:
-        future_to_index = {
-            executor.submit(locs[i].download): i for i in range(len(locs))
-        }
-        for future in futures.as_completed(future_to_index):
-            i = future_to_index[future]
-            pano = future.result()
-            image.paste(pano, (i % 2 * pano.width, int(i / 2) * pano.height))
-            pano.close()
-
+    image = await generate_image(locs)
     image_path = f"./images/{ctx.guild.id}.png"
     image.save(image_path, "png")
     file = discord.File(image_path, filename="challenge.png")
