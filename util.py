@@ -18,9 +18,9 @@ def rand_locs(*, amount: int) -> list[Location]:
     country = rand_country()
     locs = []
     while not len(locs) == amount:
-        loc = country[random.randint(0, len(country) - 1)]
+        loc = Location(country[random.randint(0, len(country) - 1)])
         if not loc in locs:
-            locs.append(Location(loc))
+            locs.append(loc)
     return locs
 
 def get_all_countries() -> list[str]:
